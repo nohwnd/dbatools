@@ -68,16 +68,60 @@ Tests whether the service account running the "sqlcluster" SQL Server isntance c
 		[System.Management.Automation.PSCredential]$SqlCredential
 	)
 
-	$server = Connect-SqlServer -SqlServer $SqlServer -SqlCredential $SqlCredential
-	$sql = "EXEC master.dbo.xp_fileexist '$path'"
-	$fileexist = $server.ConnectionContext.ExecuteWithResults($sql)
+	$sql = Get-FileExistQuery -Path $Path
+	$result = Execute-WithResult -Server $SqlServer -Credential $SqlCredential -Command $sql | ConvertTo-SqlFileExists
 
-	if ($fileexist.tables.rows[0] -eq $true -or $fileexist.tables.rows[1] -eq $true)
-	{
-		return $true
-	}
-	else
-	{
-		return $false
-	}
+	Test-SqlFileExist $result
+}
+
+function Execute-WithResult ($Connection, $Command) {
+    $connection = Connect-SqlServer -SqlServer $SqlServer -SqlCredential $SqlCredential
+	$connection.ConnectionContext.ExecuteWithResults($Command)
+}
+
+function Get-FirstTable ($SqlResult) { 
+	$SqlResult.Tables
+}
+
+function New-PSObject ([hashtable]$Property) {
+    New-Object -TypeName PSObject -Property $Property
+}
+
+function New-FileExistsObject ([bool]$FileExists, [bool]$DirectoryExists) {
+    New-PSObject @{
+        FileExists = $FileExists
+        DirectoryExists = $DirectoryExists
+    }
+}
+
+function ConvertTo-SqlFileExists {
+    param (		
+        [Parameter(ValueFromPipeline=$true)]
+        $SqlResult 
+    )
+    process 
+    {
+        $firstTable = $SqlResult.Tables[0]
+	    $firstRow = $firstTable.Rows[0]
+
+        $fileExists = $firstRow[0]
+        $directoryExists = $firstRow[1]
+
+        return New-FileExistsObject -FileExists:$fileExists -DirectoryExists:$directoryExists
+    }
+}
+
+function Test-SqlFileExist ($Result) {	
+    $result.FileExists -or $result.DirectoryExists
+}
+
+function Get-FileExistQuery  {
+        param
+        (
+        [Parameter(Mandatory=$true)]
+        [String]
+        $Path
+        )
+
+    "EXEC master.dbo.xp_fileexist '$Path'"
 }
