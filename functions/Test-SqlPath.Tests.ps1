@@ -1,7 +1,7 @@
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path
-Import-Module "$root\dbatools.psd1"
+Import-Module "$root\dbatools.psd1" -Force
 
-function Get-FileExistsMockData {
+function Get-FileExistsMockData ([switch] $FileExists, [switch] $DirectoryExists) {
 $data = @"
 <?xml version="1.0" standalone="yes"?>
 <NewDataSet>
@@ -24,8 +24,8 @@ $data = @"
   </xs:schema>
   <Table>
     <File_x0020_Exists>0</File_x0020_Exists>
-    <File_x0020_is_x0020_a_x0020_Directory>1</File_x0020_is_x0020_a_x0020_Directory>
-    <Parent_x0020_Directory_x0020_Exists>1</Parent_x0020_Directory_x0020_Exists>
+    <File_x0020_is_x0020_a_x0020_Directory>$([int][bool]$FileExists)</File_x0020_is_x0020_a_x0020_Directory>
+    <Parent_x0020_Directory_x0020_Exists>$([int][bool]$DirectoryExists)</Parent_x0020_Directory_x0020_Exists>
   </Table>
 </NewDataSet>
 "@
@@ -43,6 +43,9 @@ function To-DataSet ([System.Data.DataTable]$Table) {
    $set
 }
 
+function Get-MockCredential ($UserName = 'username', $Password = 'password') { 
+    New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList $UserName, (ConvertTo-SecureString $Password -AsPlainText -Force)
+}
 
 function Load-DataSetXml ([String]$Data) { 
     try {
@@ -62,20 +65,98 @@ function Load-DataSetXml ([String]$Data) {
     }
 }
 
-Describe 'Test-SqlPath' {
-    It 'Returns true when file exists' {
-        # -- Arrange
-        Mock Execute-WithResult { Get-FileExistsMockData } -ModuleName 'dbatools'
-
-        # -- Act
-        $actual = Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' 
-        
-        # -- Assert
-        $actual | Should Be True
-    }
-}
-
 InModuleScope -ModuleName dbatools {
+    Describe 'Test-SqlPath' {
+        #guard mock to avoid calling the server
+        Mock Execute-WithResult {}  
+
+        Context 'Test query result' {
+            It 'Returns true when only file exists' {
+                # -- Arrange
+                Mock Execute-WithResult { Get-FileExistsMockData -FileExists:$true -DirectoryExists:$false } 
+
+                # -- Act
+                $actual = Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' 
+        
+                # -- Assert
+                $actual | Should Be $True
+            }
+
+            It 'Returns true when only directory exists' {
+                # -- Arrange
+                Mock Execute-WithResult { Get-FileExistsMockData -FileExists:$false -DirectoryExists:$true } 
+
+                # -- Act
+                $actual = Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' 
+        
+                # -- Assert
+                $actual | Should Be $False
+            }
+
+            It 'Returns true when both directory and file exist' {
+                # -- Arrange
+                Mock Execute-WithResult { Get-FileExistsMockData -FileExists:$true -DirectoryExists:$true } 
+
+                # -- Act
+                $actual = Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' 
+        
+                # -- Assert
+                $actual | Should Be $True
+            }
+
+            It 'Returns false when file does not exist and directory does not exist' {
+                # -- Arrange
+                Mock Execute-WithResult { Get-FileExistsMockData -FileExists:$false -DirectoryExists:$false } 
+
+                # -- Act
+                $actual = Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' 
+        
+                # -- Assert
+                $actual | Should Be $False
+            }
+        }
+
+        Context 'Test command call' { 
+            It 'Calls Execute-WithResult with the correct command' { 
+                # -- Arrange 
+                $dummy = 'dummyCommand'
+                Mock Get-FileExistQuery { $dummy } 
+                Mock Execute-WithResult -ParameterFilter { $Command -eq $dummy } 
+            
+                # -- Act            
+                Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' 
+
+                # -- Assert
+                Assert-MockCalled Execute-WithResult -ParameterFilter { $Command -eq $dummy } -Times 1 
+            }
+
+            It 'Calls Execute-WithResult with the provided connection' { 
+                # -- Arrange 
+                $dummy = 'dummySql'
+                Mock Execute-WithResult -ParameterFilter { $SqlServer -eq $dummy } 
+            
+                # -- Act            
+                Test-SqlPath -SqlServer $dummy -Path 'dummyPath' 
+
+                # -- Assert
+                Assert-MockCalled Execute-WithResult -ParameterFilter { $SqlServer -eq $dummy } -Times 1 
+            }
+
+            It 'Calls Execute-WithResult with provided credentials' { 
+                # -- Arrange 
+                $dummy = Get-MockCredential
+                Mock Execute-WithResult -ParameterFilter { $SqlCredential -eq $dummy } 
+            
+                # -- Act            
+                Test-SqlPath -SqlServer 'dummy' -Path 'dummyPath' -SqlCredential $dummy
+                
+                # -- Assert
+                Assert-MockCalled Execute-WithResult -ParameterFilter { $SqlCredential -eq $dummy} -Times 1 
+            }
+        }
+    }
+
+
     Describe 'Get-FileExistQuery' { 
         It 'Requires path' { 
             { Get-FileExistQuery -Path '' } | Should Throw

@@ -69,12 +69,12 @@ Tests whether the service account running the "sqlcluster" SQL Server isntance c
 	)
 
 	$sql = Get-FileExistQuery -Path $Path
-	$result = Execute-WithResult -Server $SqlServer -Credential $SqlCredential -Command $sql | ConvertTo-SqlFileExists
+	$result = Execute-WithResult -SqlServer $SqlServer -SqlCredential $SqlCredential -Command $sql | ConvertTo-SqlFileExists
 
 	Test-SqlFileExist $result
 }
 
-function Execute-WithResult ($Connection, $Command) {
+function Execute-WithResult ($SqlServer, $SqlCredential, $Command) {
     $connection = Connect-SqlServer -SqlServer $SqlServer -SqlCredential $SqlCredential
 	$connection.ConnectionContext.ExecuteWithResults($Command)
 }
